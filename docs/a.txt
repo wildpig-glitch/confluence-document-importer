@@ -1,0 +1,2 @@
+This is root document A.
+Expected page title: a

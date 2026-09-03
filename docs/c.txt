@@ -1,0 +1,2 @@
+This is root document C.
+Expected page title: c

@@ -1,0 +1,2 @@
+This is document E inside directory-1.
+With --recursive, expected page title: e
