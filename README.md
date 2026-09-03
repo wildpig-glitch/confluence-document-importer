@@ -2,7 +2,7 @@
 
 A lightweight Python command-line tool for importing local documents into Confluence Cloud.
 
-For each file in a local directory, the importer creates a Confluence page and attaches the original file to that page. It is designed so additional document sources, such as Google Drive, can be added later without changing the Confluence publishing logic.
+For each file in a local directory, the importer creates a Confluence page and attaches the original file to that page.
 
 ## What it does
 
@@ -37,12 +37,6 @@ This version supports:
 - Using a Confluence parent page URL instead of manually finding the page ID
 - Safe default handling for duplicate page titles by appending suffixes like `-1`, `-2`, etc.
 - Dry-run mode for local discovery validation
-
-Planned future support:
-
-- Google Drive folder import
-- Exporting Google Docs, Sheets, and Slides before upload
-- Optional folder hierarchy mirroring in Confluence
 
 ## Requirements
 
@@ -361,23 +355,55 @@ The importer strips surrounding smart quotes from common CLI values, but if the 
 The code is split into source and publishing layers:
 
 ```text
-DocumentSource -> Document -> ConfluencePublisher
+LocalDocumentSource -> Document -> ConfluencePublisher
 ```
 
-Current source:
+This keeps local file discovery separate from Confluence page creation and attachment upload behavior.
 
-```text
-LocalDocumentSource
-```
+## Scale and limitations
 
-A future Google Drive source can implement the same `DocumentSource` interface and yield downloaded or exported files as `Document` objects. The Confluence publisher should not need to know where the file came from.
+This tool is intended for straightforward document imports from a local folder. For small and medium imports, it should be easy to run and reason about. For larger migrations, consider the limits below before running against a production Confluence space.
 
-## Limitations
+### Practical scale guidance
 
-- The importer attaches files but does not convert document contents into Confluence page content.
-- The duplicate-title check is currently space-wide, not parent-page scoped.
-- Recursive mode does not mirror folders as Confluence page hierarchy.
-- Google Drive import is planned but not yet implemented.
+| Import size | Guidance |
+| --- | --- |
+| 1–50 files | Expected to be straightforward. |
+| 50–300 files | Likely reasonable, but watch for timeout or API throttling issues. |
+| 300–1,000 files | Consider adding retry/backoff and resume support before relying on it. |
+| 1,000+ files | Not recommended without additional migration controls such as a manifest, resumability, and stronger logging. |
+
+### File size guidance
+
+| File size | Guidance |
+| --- | --- |
+| Under 10 MB | Expected to be straightforward. |
+| 10–100 MB | Usually feasible if the Confluence site allows attachments of that size. Consider increasing `--timeout-seconds`. |
+| Over 100 MB | Check the Confluence site's attachment size limit and available storage before importing. Use a longer timeout. |
+
+The script streams attachment uploads from disk, so it does not intentionally load the entire file into memory. However, large uploads can still fail because of network timeouts, connection resets, proxies/VPNs, Confluence attachment limits, or site storage limits.
+
+### Confluence limits
+
+Actual limits depend on the target Confluence Cloud site configuration and plan:
+
+- Individual attachment size may be limited by site settings.
+- Total uploaded data counts against the site's Confluence storage usage.
+- Large imports can encounter Confluence Cloud API rate limits or transient API errors.
+
+### Current reliability limitations
+
+The importer currently runs sequentially and does not include:
+
+- Automatic retry/backoff for rate limits or transient server errors
+- A local import manifest
+- Resume support after partial failure
+- Parent-scoped duplicate detection
+- Folder hierarchy mirroring in Confluence
+
+Because the default duplicate behavior is `--on-existing rename`, rerunning a partially completed import may create additional suffixed pages. For reruns after a failure, consider using `--on-existing skip` or manually reviewing the target parent page before retrying.
+
+The importer attaches files but does not convert document contents into Confluence page content.
 
 ## License
 
