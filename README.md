@@ -1,54 +1,98 @@
-# Import documents to Confluence
+# Confluence Document Importer
 
-A small Python CLI that creates one Confluence page per local document and attaches the source file to that page.
+A lightweight Python command-line tool for importing local documents into Confluence Cloud.
 
-This is intentionally structured so the document source can later be swapped from local files to Google Drive without changing the Confluence publishing logic.
+For each file in a local directory, the importer creates a Confluence page and attaches the original file to that page. It is designed so additional document sources, such as Google Drive, can be added later without changing the Confluence publishing logic.
 
-## Current scope: v1 local files
+## What it does
 
-For each local file, the importer:
-
-1. Derives a Confluence page title from the filename.
-2. Creates a page in the target Confluence space, optionally under a parent page.
-3. Adds a simple metadata table to the page body.
-4. Uploads the original file as an attachment.
-
-By default, if a page with the same title already exists in the target space, the importer creates the new page with a conflict-free suffix such as `-1`, `-2`, and so on.
-
-## Project layout
+Given a local folder like this:
 
 ```text
-import_docs_to_confluence/
-  __main__.py            # Lets you run: python -m import_docs_to_confluence
-  cli.py                 # CLI entry point and orchestration
-  confluence.py          # Confluence API client/publisher
-  models.py              # Shared Document model
-  target.py              # Confluence URL parsing and target resolution models
-  sources/
-    base.py              # DocumentSource interface
-    local.py             # LocalDocumentSource implementation
+docs/
+├── onboarding.pdf
+├── architecture-notes.docx
+└── release-plan.txt
 ```
 
-For Google Drive v2, add a new source like:
+The importer creates pages like this under a selected Confluence parent page:
 
 ```text
-import_docs_to_confluence/sources/gdrive.py
+Selected parent page
+├── onboarding
+├── architecture-notes
+└── release-plan
 ```
 
-that implements `DocumentSource.iter_documents()` and yields `Document` objects with local `attachment_path` values pointing to downloaded or exported files.
+Each created page contains a small metadata table and has the corresponding source file attached.
 
-## Setup
+## Current status
+
+This version supports:
+
+- Importing files from a local directory
+- Optional recursive file discovery
+- Creating one Confluence page per file
+- Attaching the original file to the created page
+- Using a Confluence parent page URL instead of manually finding the page ID
+- Safe default handling for duplicate page titles by appending suffixes like `-1`, `-2`, etc.
+- Dry-run mode for local discovery validation
+
+Planned future support:
+
+- Google Drive folder import
+- Exporting Google Docs, Sheets, and Slides before upload
+- Optional folder hierarchy mirroring in Confluence
+
+## Requirements
+
+- Python 3.10 or newer recommended
+- A Confluence Cloud site
+- A Confluence API token
+- Permission to create pages and upload attachments in the target Confluence space
+
+## Installation
+
+Clone the repository:
+
+```bash
+git clone https://github.com/wildpig-glitch/confluence-document-importer.git
+cd confluence-document-importer
+```
+
+Create and activate a virtual environment:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+```
+
+Install dependencies:
+
+```bash
+python3 -m pip install -r requirements.txt
+```
+
+> Note: dry-run mode for local file discovery can run without installing dependencies, but real Confluence imports require `requests`.
+
+## Authentication
+
+The importer uses Confluence Cloud basic authentication with your Atlassian email address and an API token.
+
+You can provide credentials with CLI flags:
+
+```bash
+--confluence-email "you@example.com" \
+--confluence-api-token "YOUR_API_TOKEN"
+```
+
+Or place them in a local `.env` file:
+
+```bash
 cp .env.example .env
 ```
 
-For dry-run-only local discovery, you can skip dependency installation and run the module directly with system Python.
-
-Edit `.env` for real imports:
+Then edit `.env`:
 
 ```bash
 CONFLUENCE_BASE_URL=https://your-domain.atlassian.net/wiki
@@ -56,95 +100,95 @@ CONFLUENCE_EMAIL=you@example.com
 CONFLUENCE_API_TOKEN=your-api-token
 ```
 
-You can also pass these values directly as CLI flags. If you pass `--parent-page-url`, the site, space key, and parent page ID can usually be inferred from that URL.
+Do not commit `.env`. It is ignored by `.gitignore`.
 
-## Preferred usage: paste the parent page URL
+## Recommended usage
 
-Dry run first:
+The easiest way to select the destination is to paste the Confluence parent page URL.
+
+First run a dry run:
 
 ```bash
 python3 -m import_docs_to_confluence \
   --local-dir ./docs \
-  --parent-page-url "https://your-domain.atlassian.net/wiki/spaces/ENG/pages/123456789/Imported+Docs" \
+  --parent-page-url "https://your-domain.atlassian.net/wiki/spaces/SPACEKEY/pages/123456789/Parent+Page" \
   --dry-run
 ```
 
-Run the import:
+Then run the real import:
 
 ```bash
 python3 -m import_docs_to_confluence \
   --local-dir ./docs \
-  --parent-page-url "https://your-domain.atlassian.net/wiki/spaces/ENG/pages/123456789/Imported+Docs"
+  --parent-page-url "https://your-domain.atlassian.net/wiki/spaces/SPACEKEY/pages/123456789/Parent+Page" \
+  --confluence-email "you@example.com" \
+  --confluence-api-token "YOUR_API_TOKEN"
 ```
 
-With this URL format, the importer infers:
+For a URL like this:
+
+```text
+https://your-domain.atlassian.net/wiki/spaces/SPACEKEY/pages/123456789/Parent+Page
+```
+
+The importer infers:
 
 ```text
 site:   https://your-domain.atlassian.net/wiki
-space:  ENG
+space:  SPACEKEY
 parent: 123456789
 ```
 
-## Explicit target usage
+## Recursive import
 
-You can still pass target pieces explicitly:
+By default, only files directly inside `--local-dir` are imported.
 
-```bash
-python3 -m import_docs_to_confluence \
-  --local-dir ./docs \
-  --confluence-base-url https://your-domain.atlassian.net/wiki \
-  --space-key ENG \
-  --parent-page-id 123456789
-```
-
-If both URL-inferred values and explicit flags are present, explicit flags win.
-
-If you omit both `--parent-page-url` and `--parent-page-id`, pages are created at the root of the target space.
-
-## Supported parent page URL formats
-
-Supported and can infer site, space, and parent page ID:
-
-```text
-https://your-domain.atlassian.net/wiki/spaces/ENG/pages/123456789/Page+Title
-```
-
-Supported but cannot infer the space key, so pass `--space-key` too:
-
-```text
-https://your-domain.atlassian.net/wiki/pages/viewpage.action?pageId=123456789
-```
-
-Example:
-
-```bash
-python3 -m import_docs_to_confluence \
-  --local-dir ./docs \
-  --parent-page-url "https://your-domain.atlassian.net/wiki/pages/viewpage.action?pageId=123456789" \
-  --space-key ENG
-```
-
-Short links like `/wiki/x/...` are not supported in v1 because they require resolving the link through Confluence.
-
-## Other examples
-
-Recursive import:
+Use `--recursive` to include files in subdirectories:
 
 ```bash
 python3 -m import_docs_to_confluence \
   --local-dir ./docs \
   --recursive \
-  --parent-page-url "https://your-domain.atlassian.net/wiki/spaces/ENG/pages/123456789/Imported+Docs"
+  --parent-page-url "https://your-domain.atlassian.net/wiki/spaces/SPACEKEY/pages/123456789/Parent+Page" \
+  --confluence-email "you@example.com" \
+  --confluence-api-token "YOUR_API_TOKEN"
 ```
 
-Only include PDFs and Word docs:
+Recursive mode currently discovers files recursively but creates all pages directly under the same selected Confluence parent page. It does not mirror the local directory structure in Confluence.
+
+Example local tree:
+
+```text
+docs/
+├── a.txt
+├── b.txt
+└── folder-1/
+    ├── c.txt
+    └── d.txt
+```
+
+With `--recursive`, the Confluence result is:
+
+```text
+Parent page
+├── a
+├── b
+├── c
+└── d
+```
+
+## Include and exclude patterns
+
+Only import PDFs and Word documents:
 
 ```bash
 python3 -m import_docs_to_confluence \
   --local-dir ./docs \
   --include '*.pdf' \
   --include '*.docx' \
-  --parent-page-url "https://your-domain.atlassian.net/wiki/spaces/ENG/pages/123456789/Imported+Docs"
+  --parent-page-url "https://your-domain.atlassian.net/wiki/spaces/SPACEKEY/pages/123456789/Parent+Page" \
+  --confluence-email "you@example.com" \
+  --confluence-api-token "YOUR_API_TOKEN"
 ```
 
 Exclude temporary files:
@@ -154,28 +198,86 @@ python3 -m import_docs_to_confluence \
   --local-dir ./docs \
   --exclude '~$*' \
   --exclude '*.tmp' \
-  --parent-page-url "https://your-domain.atlassian.net/wiki/spaces/ENG/pages/123456789/Imported+Docs"
+  --parent-page-url "https://your-domain.atlassian.net/wiki/spaces/SPACEKEY/pages/123456789/Parent+Page" \
+  --confluence-email "you@example.com" \
+  --confluence-api-token "YOUR_API_TOKEN"
 ```
 
-## Existing page behavior
+## Duplicate page title behavior
 
-Use `--on-existing` to control duplicate page titles:
+By default, the importer uses:
 
-- `rename` default: create a new page using the next available suffix, for example `example-1`, `example-2`, etc.
-- `skip`: leave existing page untouched and do not upload the attachment.
-- `fail`: report an error for that document.
-- `update`: replace the generated metadata body and upload a new attachment version if an attachment with the same filename already exists.
+```bash
+--on-existing rename
+```
+
+If a page title already exists in the target Confluence space, the new page is created with a suffix.
+
+Example:
+
+```text
+example
+example-1
+example-2
+```
+
+Available policies:
+
+| Policy | Behavior |
+| --- | --- |
+| `rename` | Default. Create a new page using the next available suffix. |
+| `skip` | Skip the file if a page with the same title already exists. |
+| `fail` | Report an error if a page with the same title already exists. |
+| `update` | Update the existing page body and upload a new attachment version. |
 
 Example:
 
 ```bash
 python3 -m import_docs_to_confluence \
   --local-dir ./docs \
-  --parent-page-url "https://your-domain.atlassian.net/wiki/spaces/ENG/pages/123456789/Imported+Docs" \
-  --on-existing update
+  --parent-page-url "https://your-domain.atlassian.net/wiki/spaces/SPACEKEY/pages/123456789/Parent+Page" \
+  --on-existing fail \
+  --confluence-email "you@example.com" \
+  --confluence-api-token "YOUR_API_TOKEN"
 ```
 
-## CLI options
+## Supported parent page URL formats
+
+Preferred format:
+
+```text
+https://your-domain.atlassian.net/wiki/spaces/SPACEKEY/pages/123456789/Page+Title
+```
+
+This can infer the site, space key, and parent page ID.
+
+Legacy format:
+
+```text
+https://your-domain.atlassian.net/wiki/pages/viewpage.action?pageId=123456789
+```
+
+This can infer the site and parent page ID, but not the space key. When using this format, also pass `--space-key`.
+
+Short links such as `/wiki/x/...` are not supported in this version.
+
+## Explicit target usage
+
+Instead of using `--parent-page-url`, you can pass the target pieces manually:
+
+```bash
+python3 -m import_docs_to_confluence \
+  --local-dir ./docs \
+  --confluence-base-url https://your-domain.atlassian.net/wiki \
+  --space-key SPACEKEY \
+  --parent-page-id 123456789 \
+  --confluence-email "you@example.com" \
+  --confluence-api-token "YOUR_API_TOKEN"
+```
+
+If `--parent-page-id` is omitted, pages are created at the root of the target space.
+
+## CLI reference
 
 ```text
 --source local                 Source type. Currently only local is implemented.
@@ -195,27 +297,32 @@ python3 -m import_docs_to_confluence \
 --timeout-seconds N            Per-request HTTP timeout.
 ```
 
+## Test fixture
+
+This repository includes a small `docs/` directory that can be used for testing:
+
+```text
+docs/
+├── a.txt
+├── b.txt
+├── c.txt
+├── example.txt
+├── directory-1/
+│   ├── d.txt
+│   ├── e.txt
+│   └── summary.txt
+└── directory-2/
+    ├── f.txt
+    └── summary.txt
+```
+
+The two `summary.txt` files are useful for testing duplicate title handling with recursive imports.
+
 ## Troubleshooting
-
-### `'latin-1' codec can't encode character '\\u201c'`
-
-This usually means one of the command values was pasted with smart quotes, for example:
-
-```text
-“your.email@example.com”
-```
-
-instead of normal shell quotes:
-
-```text
-"your.email@example.com"
-```
-
-The importer now strips surrounding smart quotes from common CLI/config values, but if the value still contains non-Basic-Auth characters, retype the email/token using plain ASCII characters.
 
 ### `ModuleNotFoundError: No module named 'requests'`
 
-Real Confluence imports require dependencies:
+Real Confluence imports require dependencies. Use a virtual environment:
 
 ```bash
 python3 -m venv .venv
@@ -223,26 +330,55 @@ source .venv/bin/activate
 python3 -m pip install -r requirements.txt
 ```
 
-Dry-runs do not require `requests`.
+### `externally-managed-environment`
 
-## Google Drive extension plan
+On macOS with Homebrew Python, avoid installing packages globally. Use a virtual environment instead:
 
-A future `GoogleDriveDocumentSource` should:
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install -r requirements.txt
+```
 
-1. Authenticate with Google Drive using OAuth or a service account.
-2. List files from a configured folder ID.
-3. For regular binary files, download them directly to a temporary working directory.
-4. For Google-native files, export them to a chosen format, for example:
-   - Google Docs -> `.docx` or `.pdf`
-   - Google Sheets -> `.xlsx` or `.pdf`
-   - Google Slides -> `.pptx` or `.pdf`
-5. Yield the same `Document` model used by the local source.
-6. Clean up temporary files after import.
+### `'latin-1' codec can't encode character '\u201c'`
 
-The Confluence publisher should not need to know whether the file came from disk or Google Drive.
+This usually means a value was pasted with smart quotes:
 
-## Notes
+```text
+“you@example.com”
+```
 
-- Page bodies are intentionally simple container pages; the source document content is not converted into Confluence page content.
-- Attachments are uploaded as the original file. If `--on-existing update` is used and an attachment with the same filename exists, a new attachment version is uploaded.
-- Page title lookup is currently space-wide by exact title, not parent-page-specific. This keeps v1 simple but means duplicate titles in different parts of the same space may still be treated as existing pages.
+Use normal shell quotes instead:
+
+```text
+"you@example.com"
+```
+
+The importer strips surrounding smart quotes from common CLI values, but if the value still contains unsupported characters, retype the email or token using plain ASCII characters.
+
+## Design notes
+
+The code is split into source and publishing layers:
+
+```text
+DocumentSource -> Document -> ConfluencePublisher
+```
+
+Current source:
+
+```text
+LocalDocumentSource
+```
+
+A future Google Drive source can implement the same `DocumentSource` interface and yield downloaded or exported files as `Document` objects. The Confluence publisher should not need to know where the file came from.
+
+## Limitations
+
+- The importer attaches files but does not convert document contents into Confluence page content.
+- The duplicate-title check is currently space-wide, not parent-page scoped.
+- Recursive mode does not mirror folders as Confluence page hierarchy.
+- Google Drive import is planned but not yet implemented.
+
+## License
+
+No license has been added yet. Add one before distributing broadly if needed.
